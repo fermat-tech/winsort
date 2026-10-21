@@ -21,7 +21,7 @@ var progName string
 
 // version is the release this source is; release builds stamp the same value
 // with -ldflags "-X main.version=vX.Y.Z".
-var version = "v1.0.1"
+var version = "v1.0.2"
 
 func init() {
 	progName = strings.TrimSuffix(filepath.Base(os.Args[0]), filepath.Ext(os.Args[0]))
@@ -72,39 +72,57 @@ var cfg config
 
 // ── argument preprocessing ────────────────────────────────────────────────────
 
-// expandArgs splits combined single-char flags (e.g. -rn → -r -n).
-// Flags that consume the next argument or an attached value: k, o, t, T, S.
+// expandArgs rewrites the command line the way GNU getopt reads it, for Go's
+// flag package, which stops at the first operand: options come out first,
+// then "--", then the operands in their original order. So `winsort f -r`
+// reverses, as in GNU sort, rather than treating "-r" as a file.
+//
+// Combined single-char flags are split (-rn → -r -n). A flag that takes a
+// value (k, o, t, T, S) takes the rest of its cluster (-tX) or else the next
+// argument, whatever it looks like (-t -). "-" is an operand; "--" ends the
+// options; with POSIXLY_CORRECT set, so does the first operand, as in getopt.
 func expandArgs(args []string) []string {
 	valueFlag := map[byte]bool{'k': true, 'o': true, 't': true, 'T': true, 'S': true}
-	var out []string
-	for _, a := range args {
-		if a == "--" || !strings.HasPrefix(a, "-") || strings.HasPrefix(a, "--") || len(a) <= 2 {
-			out = append(out, a)
+	_, posix := os.LookupEnv("POSIXLY_CORRECT")
+	var opts, operands []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			operands = append(operands, args[i+1:]...)
+			break
+		}
+		if a == "-" || !strings.HasPrefix(a, "-") {
+			if posix {
+				operands = append(operands, args[i:]...)
+				break
+			}
+			operands = append(operands, a)
+			continue
+		}
+		if strings.HasPrefix(a, "--") {
+			opts = append(opts, a)
 			continue
 		}
 		flags := a[1:]
-		var expanded []string
-		consumed := false
 		for j := 0; j < len(flags); j++ {
 			ch := flags[j]
+			opts = append(opts, "-"+string(ch))
 			if valueFlag[ch] {
-				// rest of the cluster is the value: -tX → -t X
-				expanded = append(expanded, "-"+string(ch))
 				if j+1 < len(flags) {
-					expanded = append(expanded, flags[j+1:])
+					opts = append(opts, flags[j+1:])
+				} else if i+1 < len(args) {
+					i++
+					opts = append(opts, args[i])
+				} else {
+					// No value: end on the bare flag so the flag package
+					// reports it, not take the "--" below as the value.
+					return opts
 				}
-				consumed = true
 				break
 			}
-			expanded = append(expanded, "-"+string(ch))
-		}
-		if consumed || len(expanded) > 1 {
-			out = append(out, expanded...)
-		} else {
-			out = append(out, a) // single flag, pass through unchanged
 		}
 	}
-	return out
+	return append(append(opts, "--"), operands...)
 }
 
 // ── key parsing ───────────────────────────────────────────────────────────────

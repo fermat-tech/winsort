@@ -115,6 +115,76 @@ func TestCheckReport(t *testing.T) {
 	}
 }
 
+// Options may follow operands, as GNU getopt permutes them: expandArgs moves
+// every option ahead of a "--" and keeps the operands in order. It used to
+// pass the command line through, and the flag package stopped at the first
+// operand, so `winsort f -r` read a file named "-r".
+func TestPermute(t *testing.T) {
+	cases := []struct {
+		name  string
+		posix bool
+		in    []string
+		want  []string
+	}{
+		{"trailing flag", false, []string{"f", "-r"}, []string{"-r", "--", "f"}},
+		{"cluster", false, []string{"f", "-rk2,2", "g"}, []string{"-r", "-k", "2,2", "--", "f", "g"}},
+		{"separate value", false, []string{"f", "-k", "2,2", "-n"}, []string{"-k", "2,2", "-n", "--", "f"}},
+		{"value looks like a flag", false, []string{"f", "-t", "-", "-o", "-r"}, []string{"-t", "-", "-o", "-r", "--", "f"}},
+		{"attached value", false, []string{"f", "-oout", "-t,"}, []string{"-o", "out", "-t", ",", "--", "f"}},
+		{"dash is an operand", false, []string{"f", "-", "-r"}, []string{"-r", "--", "f", "-"}},
+		{"double dash ends options", false, []string{"f", "--", "-r", "g"}, []string{"--", "f", "-r", "g"}},
+		{"long option", false, []string{"f", "--version"}, []string{"--version", "--", "f"}},
+		{"missing value", false, []string{"f", "-t"}, []string{"-t"}},
+		{"POSIXLY_CORRECT stops at an operand", true, []string{"-n", "f", "-r"}, []string{"-n", "--", "f", "-r"}},
+		{"nothing", false, nil, []string{"--"}},
+	}
+	for _, c := range cases {
+		if c.posix {
+			t.Setenv("POSIXLY_CORRECT", "1")
+		} else {
+			os.Unsetenv("POSIXLY_CORRECT")
+		}
+		if got := expandArgs(c.in); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: expandArgs(%q)\n got  %q\n want %q", c.name, c.in, got, c.want)
+		}
+	}
+}
+
+// End to end, against GNU sort 8.32's output for the same command lines.
+func TestOptionsAfterOperands(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "f")
+	if err := os.WriteFile(f, []byte("b 2\na 3\nc 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out")
+	cases := []struct {
+		args   []string
+		stdout string
+		stderr string
+		code   int
+	}{
+		{[]string{f, "-r"}, "c 1\nb 2\na 3\n", "", 0},
+		{[]string{f, "-k", "2,2", "-n"}, "c 1\nb 2\na 3\n", "", 0},
+		{[]string{f, "-rk2,2"}, "a 3\nb 2\nc 1\n", "", 0},
+		{[]string{"-c", f, "-k2,2"}, "", "%s: " + f + ":3: disorder: c 1\n", 1},
+		{[]string{f, "-o", out, "-r"}, "", "", 0},
+	}
+	for _, c := range cases {
+		stdout, stderr, code := run(t, "", c.args...)
+		want := c.stderr
+		if want != "" {
+			want = fmt.Sprintf(want, progName)
+		}
+		if stdout != c.stdout || stderr != want || code != c.code {
+			t.Errorf("%q: got %q %q rc=%d, want %q %q rc=%d", c.args, stdout, stderr, code, c.stdout, want, c.code)
+		}
+	}
+	if b, err := os.ReadFile(out); err != nil || string(b) != "c 1\nb 2\na 3\n" {
+		t.Errorf("-o after the operand: got %q, %v", b, err)
+	}
+}
+
 func TestVersion(t *testing.T) {
 	for _, args := range [][]string{{"--version"}, {"--version", "nonexistent"}} {
 		out, stderr, code := run(t, "", args...)
