@@ -19,6 +19,10 @@ import (
 
 var progName string
 
+// version is the release this source is; release builds stamp the same value
+// with -ldflags "-X main.version=vX.Y.Z".
+var version = "v1.0.1"
+
 func init() {
 	progName = strings.TrimSuffix(filepath.Base(os.Args[0]), filepath.Ext(os.Args[0]))
 	rand.Seed(time.Now().UnixNano()) //nolint:staticcheck
@@ -369,6 +373,34 @@ func parseLeadingFloat(s string) (float64, bool) {
 	return f, err == nil
 }
 
+// parseNumeric reads the leading number of s the way GNU sort -n does: blanks,
+// an optional '-', digits, and an optional fraction. No '+' and no exponent --
+// those are -g's -- so "+1" and "x" both count as zero, and "1e3" as 1.
+func parseNumeric(s string) float64 {
+	s = strings.TrimLeft(s, " \t")
+	i := 0
+	if i < len(s) && s[i] == '-' {
+		i++
+	}
+	digits := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+		digits++
+	}
+	if i < len(s) && s[i] == '.' {
+		i++
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+			digits++
+		}
+	}
+	if digits == 0 {
+		return 0
+	}
+	f, _ := strconv.ParseFloat(s[:i], 64)
+	return f
+}
+
 func parseGeneral(s string) float64 {
 	s = strings.TrimLeft(s, " \t")
 	up := strings.ToUpper(s)
@@ -575,15 +607,7 @@ func compareByKey(ka, kb string, k keyDef) int {
 	case k.general:
 		c = cmpFloat(parseGeneral(ka), parseGeneral(kb))
 	case k.numeric:
-		fa, oka := parseLeadingFloat(ka)
-		fb, okb := parseLeadingFloat(kb)
-		if !oka {
-			fa = 0
-		}
-		if !okb {
-			fb = 0
-		}
-		c = cmpFloat(fa, fb)
+		c = cmpFloat(parseNumeric(ka), parseNumeric(kb))
 	case k.version:
 		c = cmpVersion(ka, kb)
 	default:
@@ -668,8 +692,10 @@ func dedup(lines []string) []string {
 	return out
 }
 
-// checkSorted exits non-zero if lines are not in sorted order.
-func checkSorted(lines []string) {
+// checkSorted exits non-zero if lines are not in sorted order. The report is
+// GNU's, "NAME: FILE:N: disorder: LINE", with FILE "-" for standard input and
+// the line ended by the -z terminator as GNU ends it.
+func checkSorted(lines []string, file string, term byte) {
 	for i := 1; i < len(lines); i++ {
 		c := compareLines(lines[i-1], lines[i])
 		ok := c <= 0
@@ -678,8 +704,8 @@ func checkSorted(lines []string) {
 		}
 		if !ok {
 			if !cfg.checkQ {
-				fmt.Fprintf(os.Stderr, "%s: -:line %d: disorder: %s\n",
-					progName, i+1, lines[i])
+				fmt.Fprintf(os.Stderr, "%s: %s:%d: disorder: %s%c",
+					progName, file, i+1, lines[i], term)
 			}
 			os.Exit(1)
 		}
@@ -773,6 +799,8 @@ func main() {
 	flag.BoolVar(&cfg.unique, "u", false, "output only the first of an equal run")
 	flag.BoolVar(&cfg.zero, "z", false, "line delimiter is NUL, not newline")
 	flag.Var(&keyFlags, "k", "sort via a key; KEYDEF gives location and type")
+	var showVersion bool
+	flag.BoolVar(&showVersion, "version", false, "output version information and exit")
 
 	flag.Usage = func() {
 		w := os.Stderr
@@ -800,7 +828,8 @@ func main() {
 		fmt.Fprintf(w, "  -s          stable sort (disable last-resort comparison)\n")
 		fmt.Fprintf(w, "  -t SEP      use SEP as field separator (default: whitespace)\n")
 		fmt.Fprintf(w, "  -u          with -c: check strict ordering; otherwise: deduplicate\n")
-		fmt.Fprintf(w, "  -z          line delimiter is NUL, not newline\n\n")
+		fmt.Fprintf(w, "  -z          line delimiter is NUL, not newline\n")
+		fmt.Fprintf(w, "  --version   output version information and exit\n\n")
 		fmt.Fprintf(w, "KEYDEF examples:\n")
 		fmt.Fprintf(w, "  -k2,2       sort by second field only\n")
 		fmt.Fprintf(w, "  -k1.2,1.4   sort by characters 2-4 of field 1\n")
@@ -809,6 +838,11 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if showVersion {
+		fmt.Printf("%s %s\n", progName, version)
+		return
+	}
 
 	if sepStr != "" {
 		r, _ := utf8.DecodeRuneInString(sepStr)
@@ -829,14 +863,29 @@ func main() {
 		term = 0
 	}
 
+	// -c and -C check one input, as in GNU sort.
+	checking := cfg.check || cfg.checkQ
+	if checking && flag.NArg() > 1 {
+		opt := "c"
+		if !cfg.check {
+			opt = "C"
+		}
+		fmt.Fprintf(os.Stderr, "%s: extra operand '%s' not allowed with -%s\n", progName, flag.Arg(1), opt)
+		os.Exit(2)
+	}
+
 	lines, err := readAllLines(flag.Args(), term)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", progName, err)
 		os.Exit(1)
 	}
 
-	if cfg.check || cfg.checkQ {
-		checkSorted(lines)
+	if checking {
+		file := "-"
+		if flag.NArg() == 1 {
+			file = flag.Arg(0)
+		}
+		checkSorted(lines, file, term)
 		return
 	}
 

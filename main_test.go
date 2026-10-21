@@ -1,7 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -23,6 +29,99 @@ func sorted(t *testing.T, lines []string, keys []string, setup func()) []string 
 	out := append([]string(nil), lines...)
 	sortLines(out)
 	return out
+}
+
+// TestMain lets a test run the real main() in a child process, for behavior
+// that ends in os.Exit: WINSORT_TEST_ARGS holds the arguments, separated by
+// U+001F (an environment variable cannot hold a NUL).
+func TestMain(m *testing.M) {
+	if args, ok := os.LookupEnv("WINSORT_TEST_ARGS"); ok {
+		os.Args = append(os.Args[:1], strings.Split(args, "\x1f")...)
+		main()
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+// run executes winsort with args and stdin, returning stdout, stderr and the
+// exit code.
+func run(t *testing.T, stdin string, args ...string) (string, string, int) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0])
+	cmd.Env = append(os.Environ(), "WINSORT_TEST_ARGS="+strings.Join(args, "\x1f"))
+	cmd.Stdin = strings.NewReader(stdin)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	code := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	return out.String(), errb.String(), code
+}
+
+// -n reads what GNU sort -n reads: an optional '-', digits and a fraction. A
+// '+' or an exponent is not part of the number, so "+1" sorts as zero and
+// "1e3" as 1. It used to take both, as -g does. Expectations are GNU sort
+// 8.32's under LC_ALL=C.
+func TestNumeric(t *testing.T) {
+	in := []string{"1e3", "2", "-.5", ".5", "-", "-0", "0", "1.", "-x", "--1", " \t7", "00.10", ".1", "+1", "+5", "-1"}
+	want := []string{"-1", "-.5", "+1", "+5", "-", "--1", "-0", "-x", "0", ".1", "00.10", ".5", "1.", "1e3", "2", " \t7"}
+	got := sorted(t, in, nil, func() { cfg.numeric = true })
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("-n:\n got  %q\n want %q", got, want)
+	}
+	got = dedup(sorted(t, []string{"+1", "1", "x", "1.0"}, nil, func() { cfg.numeric = true; cfg.unique = true }))
+	if want := []string{"+1", "1"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("-u -n:\n got  %q\n want %q", got, want)
+	}
+}
+
+// -c and -C report as GNU sort does, naming the file, and check one file only.
+func TestCheckReport(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "in")
+	if err := os.WriteFile(f, []byte("b\na\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, stdin string
+		args        []string
+		stderr      string
+		code        int
+	}{
+		{"stdin", "b\na\n", []string{"-c"}, "%s: -:2: disorder: a\n", 1},
+		{"dash", "b\na\n", []string{"-c", "-"}, "%s: -:2: disorder: a\n", 1},
+		{"file", "", []string{"-c", f}, "%s: " + f + ":2: disorder: a\n", 1},
+		{"-z", "b\x00a\x00", []string{"-c", "-z"}, "%s: -:2: disorder: a\x00", 1},
+		{"key", "a b\na a\n", []string{"-c", "-k2,2"}, "%s: -:2: disorder: a a\n", 1},
+		{"-u", "a\na\n", []string{"-c", "-u"}, "%s: -:2: disorder: a\n", 1},
+		{"sorted", "a\nb\n", []string{"-c"}, "", 0},
+		{"-C", "b\na\n", []string{"-C"}, "", 1},
+		{"extra -c", "", []string{"-c", f, f}, "%s: extra operand '" + f + "' not allowed with -c\n", 2},
+		{"extra -C", "", []string{"-C", f, f}, "%s: extra operand '" + f + "' not allowed with -C\n", 2},
+	}
+	for _, c := range cases {
+		_, stderr, code := run(t, c.stdin, c.args...)
+		want := c.stderr
+		if want != "" {
+			want = fmt.Sprintf(c.stderr, progName)
+		}
+		if stderr != want || code != c.code {
+			t.Errorf("%s: got %q rc=%d, want %q rc=%d", c.name, stderr, code, want, c.code)
+		}
+	}
+}
+
+func TestVersion(t *testing.T) {
+	for _, args := range [][]string{{"--version"}, {"--version", "nonexistent"}} {
+		out, stderr, code := run(t, "", args...)
+		if want := progName + " " + version + "\n"; out != want || stderr != "" || code != 0 {
+			t.Errorf("%q: got %q %q rc=%d, want %q", args, out, stderr, code, want)
+		}
+	}
 }
 
 // -u keeps the first line of each run of equal keys, in input order: equality

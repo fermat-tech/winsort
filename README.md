@@ -17,8 +17,8 @@ Part of the [fermat-tech](https://github.com/fermat-tech) suite of Unix-style co
 ### Option 1 — Download the release binary
 
 1. Go to the [Releases](https://github.com/fermat-tech/winsort/releases) page.
-2. Download `winsort.exe` from the latest release.
-3. Place it somewhere on your `PATH` (e.g. `C:\Windows\System32` or a personal `bin\` folder).
+2. Download `winsort_windows_amd64.exe` (Intel/AMD) or `winsort_windows_arm64.exe` (ARM) from the latest release.
+3. Rename it `winsort.exe` and place it somewhere on your `PATH` (e.g. a personal `bin\` folder).
 
 ### Option 2 — Install with `go install`
 
@@ -52,7 +52,7 @@ With no FILE, or when FILE is `-`, read standard input.
 | `-h` | Human-readable numeric — `1K`, `2M`, `1G`, etc. (1024-based) |
 | `-i` | Ignore non-printable characters |
 | `-M` | Month sort — `(unknown) < JAN < FEB < … < DEC` |
-| `-n` | Numeric sort |
+| `-n` | Numeric sort — an optional `-`, digits and a fraction, as GNU reads them; `+1` and `1e3` are not (`-g` takes both) |
 | `-R` | Random shuffle (identical keys are grouped) |
 | `-r` | Reverse the result of comparisons |
 | `-V` | Version / natural sort — `v1.9 < v1.10 < v2.0` |
@@ -61,7 +61,7 @@ With no FILE, or when FILE is `-`, read standard input.
 
 | Flag | Description |
 |------|-------------|
-| `-c` | Check for sorted input; do not sort (exit 1 if disordered) |
+| `-c` | Check one input for sorted order; do not sort. Exit 1 with `winsort: FILE:N: disorder: LINE` if disordered |
 | `-C` | Like `-c`, but do not report the first disordered line |
 | `-k KEYDEF` | Sort via a key (see **Key definitions** below) |
 | `-m` | Merge already-sorted files |
@@ -70,6 +70,7 @@ With no FILE, or when FILE is `-`, read standard input.
 | `-t SEP` | Use SEP as the field separator (default: whitespace) |
 | `-u` | With `-c`: check strict ordering; otherwise: output only the first of each equal run |
 | `-z` | Line delimiter is NUL, not newline |
+| `--version` | Print the version and exit |
 
 ### Key definitions
 
