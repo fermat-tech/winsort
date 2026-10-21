@@ -25,6 +25,48 @@ func sorted(t *testing.T, lines []string, keys []string, setup func()) []string 
 	return out
 }
 
+// -u keeps the first line of each run of equal keys, in input order: equality
+// is the keys' alone, with no last-resort comparison. It used to compare whole
+// lines, so with a key nothing was ever removed. Expectations are GNU sort
+// 8.32's under LC_ALL=C.
+func TestUniqueByKey(t *testing.T) {
+	letters := []string{"b 1", "a 1", "c 2", "B 1", "A 2"}
+	folded := []string{"a", "A", "b", "a", "B"}
+	multi := []string{"x 1 p", "y 1 p", "z 1 q", "w 2 p"}
+	unique := func(extra func()) func() {
+		return func() {
+			cfg.unique = true
+			if extra != nil {
+				extra()
+			}
+		}
+	}
+
+	cases := []struct {
+		name  string
+		lines []string
+		keys  []string
+		setup func()
+		want  []string
+	}{
+		{"-u -k2,2", letters, []string{"2,2"}, unique(nil), []string{"b 1", "c 2"}},
+		{"-u -r -k2,2", letters, []string{"2,2"}, unique(func() { cfg.reverse = true }), []string{"c 2", "b 1"}},
+		{"-u -k2,2r", letters, []string{"2,2r"}, unique(nil), []string{"c 2", "b 1"}},
+		{"-u -s -k2,2", letters, []string{"2,2"}, unique(func() { cfg.stable = true }), []string{"b 1", "c 2"}},
+		{"-u", letters, nil, unique(nil), []string{"A 2", "B 1", "a 1", "b 1", "c 2"}},
+		{"-u -f", folded, nil, unique(func() { cfg.fold = true }), []string{"a", "b"}},
+		{"-u -f -r", folded, nil, unique(func() { cfg.fold = true; cfg.reverse = true }), []string{"b", "a"}},
+		{"-u -k2,2 -k3,3", multi, []string{"2,2", "3,3"}, unique(nil), []string{"x 1 p", "z 1 q", "w 2 p"}},
+		{"-u -k2,2", multi, []string{"2,2"}, unique(nil), []string{"x 1 p", "w 2 p"}},
+	}
+	for _, c := range cases {
+		got := dedup(sorted(t, c.lines, c.keys, c.setup))
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s:\n got  %q\n want %q", c.name, got, c.want)
+		}
+	}
+}
+
 // Ordering when keys tie, and which -r applies where. Every expectation is
 // GNU sort 8.32's under LC_ALL=C, the byte order winsort uses.
 func TestReverseAndLastResort(t *testing.T) {

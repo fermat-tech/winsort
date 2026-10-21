@@ -89,8 +89,11 @@ When every key compares equal, lines are compared as wholes, byte by byte — th
 last-resort comparison. A global `-r` reverses that too, so under
 `winsort -r -k5,5n` lines with the same key come out in descending order; a
 key's own `r` does not. `-s` turns the last-resort comparison off, keeping
-equal-key lines in input order. Before 1.0.1 the last resort ignored `-r`, and
-global options were added to every key.
+equal-key lines in input order, and so does `-u`: lines are equal when their
+keys are, and `-u` keeps the first of each equal run in input order —
+`winsort -u -k2,2` leaves one line per distinct field 2. Before 1.0.1 the last
+resort ignored `-r`, global options were added to every key, and `-u` compared
+whole lines, so with a key it removed nothing.
 
 **Examples:**
 

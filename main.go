@@ -629,10 +629,15 @@ func compareLines(a, b string) int {
 		}
 	}
 	// Last resort, when every key ties: the whole lines byte by byte (unless
-	// -s). A global -r reverses it, as in GNU sort, so equal-key lines come out
-	// descending under -r; a key's own r does not. It used to ignore -r, so
-	// `sort -r -k5,5n` listed the lines of each equal key ascending.
-	if !cfg.stable {
+	// -s or -u). A global -r reverses it, as in GNU sort, so equal-key lines
+	// come out descending under -r; a key's own r does not. It used to ignore
+	// -r, so `sort -r -k5,5n` listed the lines of each equal key ascending.
+	//
+	// -u turns it off as -s does: "equal" then means equal keys, which is what
+	// both the sort and the removal of duplicates go by -- the first line of
+	// each equal run, in input order, is the one kept. With it on, lines whose
+	// keys matched still differed as wholes, and `-u -k2,2` removed nothing.
+	if !cfg.stable && !cfg.unique {
 		c := strings.Compare(a, b)
 		if cfg.reverse {
 			return -c
