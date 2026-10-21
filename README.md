@@ -81,7 +81,16 @@ With no FILE, or when FILE is `-`, read standard input.
               OPTS   = subset of b d f g h i M n R r V
 ```
 
-Per-key flags override the global flag for that key only.
+A key takes the global ordering options only if it has none of its own: as in
+GNU `sort`, a key with any ordering letter (`-k3,3n`) uses just its own, and
+ignores every global one. So in `winsort -k1,1n -r` the key stays ascending.
+
+When every key compares equal, lines are compared as wholes, byte by byte — the
+last-resort comparison. A global `-r` reverses that too, so under
+`winsort -r -k5,5n` lines with the same key come out in descending order; a
+key's own `r` does not. `-s` turns the last-resort comparison off, keeping
+equal-key lines in input order. Before 1.0.1 the last resort ignored `-r`, and
+global options were added to every key.
 
 **Examples:**
 

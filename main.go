@@ -528,20 +528,24 @@ func randomValue(s string) int64 {
 
 // ── comparison engine ─────────────────────────────────────────────────────────
 
-// mergeGlobal applies global flags into a per-key definition.
+// hasOrdering reports whether a key carries any ordering option of its own.
+func hasOrdering(k keyDef) bool {
+	return k.blanks || k.dict || k.fold || k.general || k.ignore || k.month ||
+		k.human || k.numeric || k.random || k.version || k.reverse
+}
+
+// mergeGlobal gives a key the global ordering options, GNU's way: all or
+// nothing. A key with no ordering letters of its own takes every global one; a
+// key with any takes none. So in `-k1,1n -r` the key stays ascending and only
+// the last-resort comparison is reversed. ORing each global option into every
+// key made that key descending too.
 func mergeGlobal(k keyDef) keyDef {
-	k.blanks = k.blanks || cfg.blanks
-	k.dict = k.dict || cfg.dict
-	k.fold = k.fold || cfg.fold
-	k.general = k.general || cfg.general
-	k.ignore = k.ignore || cfg.ignore
-	k.month = k.month || cfg.month
-	k.human = k.human || cfg.human
-	k.numeric = k.numeric || cfg.numeric
-	k.random = k.random || cfg.random
-	k.version = k.version || cfg.version
-	k.reverse = k.reverse || cfg.reverse
-	return k
+	if hasOrdering(k) {
+		return k
+	}
+	g := globalKey()
+	g.f1, g.c1, g.f2, g.c2 = k.f1, k.c1, k.f2, k.c2
+	return g
 }
 
 func globalKey() keyDef {
@@ -624,14 +628,16 @@ func compareLines(a, b string) int {
 			}
 		}
 	}
-	// Last-resort: raw lexicographic (unless -s).
+	// Last resort, when every key ties: the whole lines byte by byte (unless
+	// -s). A global -r reverses it, as in GNU sort, so equal-key lines come out
+	// descending under -r; a key's own r does not. It used to ignore -r, so
+	// `sort -r -k5,5n` listed the lines of each equal key ascending.
 	if !cfg.stable {
-		if a < b {
-			return -1
+		c := strings.Compare(a, b)
+		if cfg.reverse {
+			return -c
 		}
-		if a > b {
-			return 1
-		}
+		return c
 	}
 	return 0
 }
